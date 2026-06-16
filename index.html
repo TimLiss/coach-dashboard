@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strava Coach</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --fg:#e8eaed;
+          --mut:#9aa3b2; --acc:#fc5200; --ok:#3fb950; --warn:#d29922; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.5 -apple-system,system-ui,sans-serif; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  h2 { font-size:15px; color:var(--mut); margin:20px 0 8px; text-transform:uppercase;
+       letter-spacing:.05em; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:16px; margin-bottom:14px; }
+  button { width:100%; padding:14px; border:0; border-radius:12px; font-size:16px;
+           font-weight:600; background:var(--acc); color:#fff; cursor:pointer; }
+  button.sec { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button:disabled { opacity:.5; }
+  input { width:100%; padding:12px; border:1px solid var(--line); border-radius:10px;
+          background:#0c0e12; color:var(--fg); font-size:15px; margin:6px 0 12px; }
+  label { font-size:13px; color:var(--mut); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:12px; }
+  .stat .v { font-size:24px; font-weight:700; }
+  .stat .l { font-size:12px; color:var(--mut); }
+  .mut { color:var(--mut); font-size:13px; }
+  img { width:100%; border-radius:10px; margin-top:8px; background:#fff; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td,th { padding:6px 4px; border-bottom:1px solid var(--line); text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .status { padding:8px 12px; border-radius:8px; font-size:13px; margin-top:8px; }
+  .ok{background:rgba(63,185,80,.15);color:var(--ok)}
+  .run{background:rgba(210,153,34,.15);color:var(--warn)}
+  .err{background:rgba(248,81,73,.15);color:#f85149}
+  a{color:var(--acc)}
+  .bar{height:8px;background:#0c0e12;border-radius:5px;overflow:hidden;margin-top:4px}
+  .bar>i{display:block;height:100%;background:var(--acc)}
+</style>
+</head>
+<body>
+<h1>🚴 Strava Coach</h1>
+
+<!-- Setup (einmalig) -->
+<div class="card" id="setup">
+  <label>GitHub-Benutzer</label>
+  <input id="owner" placeholder="z.B. tim">
+  <label>Repository-Name</label>
+  <input id="repo" placeholder="z.B. strava-coach">
+  <label>GitHub-Token (fine-grained PAT)</label>
+  <input id="token" type="password" placeholder="github_pat_…">
+  <button onclick="saveCfg()">Verbinden</button>
+  <p class="mut" style="margin-top:10px">Token-Rechte: <b>Actions: Read&amp;Write</b> und
+  <b>Contents: Read</b> auf dein Repo. Wird nur lokal im Browser gespeichert.</p>
+</div>
+
+<!-- Dashboard -->
+<div id="app" style="display:none">
+  <div class="card">
+    <button id="syncBtn" onclick="triggerSync()">⟳ Jetzt aktualisieren</button>
+    <div id="runStatus"></div>
+    <button class="sec" style="margin-top:10px" onclick="loadAll()">Daten neu laden</button>
+    <button class="sec" style="margin-top:8px" onclick="logout()">Abmelden / Zugang ändern</button>
+  </div>
+
+  <h2>Aktuelle Form</h2>
+  <div class="grid">
+    <div class="stat"><div class="v" id="sFtp">–</div><div class="l">FTP-Schätzung (W)</div></div>
+    <div class="stat"><div class="v" id="sWkg">–</div><div class="l">W/kg @ FTP</div></div>
+    <div class="stat"><div class="v" id="sLast">–</div><div class="l">Letzte Fahrt</div></div>
+    <div class="stat"><div class="v" id="sCount">–</div><div class="l">Fahrten gesamt</div></div>
+  </div>
+
+  <h2>Stärken / Schwächen</h2>
+  <div class="card" id="profile"><span class="mut">lädt…</span></div>
+
+  <h2>Bestleistungen</h2>
+  <div class="card"><table id="best"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+
+  <h2>Charts</h2>
+  <div class="card" id="charts"><span class="mut">lädt…</span></div>
+
+  <h2>Letzte Fahrten</h2>
+  <div class="card"><table id="rides"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+</div>
+
+<script>
+const API = "https://api.github.com";
+let cfg = JSON.parse(localStorage.getItem("sc_cfg") || "null");
+
+function gh(path, opts={}) {
+  return fetch(API + path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + cfg.token,
+               "Accept": "application/vnd.github+json", ...(opts.headers||{}) }
+  });
+}
+function b64utf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g,"")))); }
+
+async function getFile(path){
+  const r = await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/${path}`);
+  if(!r.ok) return null;
+  const j = await r.json();
+  return j.content ? b64utf8(j.content) : null;
+}
+async function getImg(path){
+  const r = await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/${path}`);
+  if(!r.ok) return null;
+  const j = await r.json();
+  return j.content ? "data:image/png;base64," + j.content.replace(/\n/g,"") : null;
+}
+
+function saveCfg(){
+  const owner=document.getElementById("owner").value.trim();
+  const repo=document.getElementById("repo").value.trim();
+  const token=document.getElementById("token").value.trim();
+  if(!owner||!repo||!token){ alert("Bitte alle Felder ausfüllen."); return; }
+  cfg={owner,repo,token,branch:"main"};
+  localStorage.setItem("sc_cfg", JSON.stringify(cfg));
+  showApp();
+}
+function logout(){ localStorage.removeItem("sc_cfg"); location.reload(); }
+
+async function showApp(){
+  document.getElementById("setup").style.display="none";
+  document.getElementById("app").style.display="block";
+  // Default-Branch ermitteln
+  const r = await gh(`/repos/${cfg.owner}/${cfg.repo}`);
+  if(r.ok){ cfg.branch=(await r.json()).default_branch||"main";
+            localStorage.setItem("sc_cfg",JSON.stringify(cfg)); }
+  loadAll();
+  pollRun();
+}
+
+async function triggerSync(){
+  const btn=document.getElementById("syncBtn"); btn.disabled=true;
+  const r = await gh(`/repos/${cfg.owner}/${cfg.repo}/actions/workflows/sync.yml/dispatches`,
+    { method:"POST", body: JSON.stringify({ref:cfg.branch}) });
+  setStatus(r.status===204 ? ["run","Aktualisierung gestartet – läuft…"]
+                           : ["err","Fehler "+r.status+" (Token-Rechte prüfen)"]);
+  setTimeout(pollRun, 3000);
+  setTimeout(()=>btn.disabled=false, 4000);
+}
+function setStatus(s){ const e=document.getElementById("runStatus");
+  e.className="status "+s[0]; e.textContent=s[1]; }
+
+async function pollRun(){
+  const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/actions/workflows/sync.yml/runs?per_page=1`);
+  if(!r.ok) return;
+  const run=(await r.json()).workflow_runs[0]; if(!run) return;
+  if(run.status!=="completed"){ setStatus(["run","Läuft… ("+run.status+")"]);
+    setTimeout(pollRun, 8000); }
+  else if(run.conclusion==="success"){ setStatus(["ok","Zuletzt aktualisiert: "
+    +new Date(run.updated_at).toLocaleString("de-DE")]); }
+  else setStatus(["err","Letzter Lauf: "+run.conclusion]);
+}
+
+function parseCSV(t){ const [h,...rows]=t.trim().split("\n").map(l=>l.split(","));
+  return rows.map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]]))); }
+
+async function loadAll(){
+  // Power-Profil
+  const pcTxt=await getFile("data/power_curve.json");
+  if(pcTxt){ const pc=JSON.parse(pcTxt);
+    document.getElementById("sFtp").textContent=pc.ftp_estimate_w??"–";
+    document.getElementById("sWkg").textContent=
+      (pc.ftp_estimate_w&&pc.weight_kg)?(pc.ftp_estimate_w/pc.weight_kg).toFixed(2):"–";
+    // Profil-Balken
+    document.getElementById("profile").innerHTML=(pc.profile||[])
+      .sort((a,b)=>b.score_0_100-a.score_0_100).map(p=>
+      `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between">
+       <span>${p.system}</span><span class="mut">${p.w} W · ${p.w_per_kg} W/kg</span></div>
+       <div class="bar"><i style="width:${p.score_0_100}%"></i></div></div>`).join("")||"–";
+    // Bestleistungen
+    document.getElementById("best").innerHTML=
+      "<thead><tr><th>Dauer</th><th>Watt</th><th>W/kg</th><th>Datum</th></tr></thead><tbody>"
+      +(pc.curve||[]).map(c=>`<tr><td>${c.label}</td><td>${c.best_w}</td>
+        <td>${c.w_per_kg??"–"}</td><td class="mut">${c.date??""}</td></tr>`).join("")+"</tbody>";
+  }
+  // Fahrten
+  const csv=await getFile("data/activities.csv");
+  if(csv){ const rows=parseCSV(csv);
+    document.getElementById("sCount").textContent=rows.length;
+    const last=rows[rows.length-1];
+    document.getElementById("sLast").textContent=last?last.distance_km+" km":"–";
+    const recent=rows.slice(-12).reverse();
+    document.getElementById("rides").innerHTML=
+      "<thead><tr><th>Datum</th><th>km</th><th>NP</th><th>TSS</th></tr></thead><tbody>"
+      +recent.map(r=>`<tr><td>${r.date}</td><td>${r.distance_km}</td>
+        <td>${r.weighted_avg_power_w||"–"}</td><td>${r.tss||"–"}</td></tr>`).join("")+"</tbody>";
+  }
+  // Charts
+  const imgs=["load_ctl_atl","power_curve","wkg_trend","distance_per_week"];
+  const cont=document.getElementById("charts"); cont.innerHTML="";
+  for(const name of imgs){ const src=await getImg("data/"+name+".png");
+    if(src){ const im=document.createElement("img"); im.src=src; cont.appendChild(im); } }
+  if(!cont.children.length) cont.innerHTML='<span class="mut">Noch keine Charts – einmal aktualisieren.</span>';
+}
+
+if(cfg) showApp();
+</script>
+</body>
+</html>
