@@ -66,12 +66,20 @@
     <button class="sec" style="margin-top:8px" onclick="logout()">Abmelden / Zugang ändern</button>
   </div>
 
+  <h2>Heute</h2>
+  <div id="today"><div class="card"><span class="mut">lädt…</span></div></div>
+
+  <h2>Diese Woche</h2>
+  <div class="card" id="week"><span class="mut">lädt…</span></div>
+
   <h2>Aktuelle Form</h2>
   <div class="grid">
-    <div class="stat"><div class="v" id="sFtp">–</div><div class="l">FTP-Schätzung (W)</div></div>
+    <div class="stat"><div class="v" id="sTsb">–</div><div class="l">Form (TSB)</div></div>
+    <div class="stat"><div class="v" id="sEf">–</div><div class="l">EF · Trend</div></div>
+    <div class="stat"><div class="v" id="sFtp">–</div><div class="l">FTP-Schätzung (W, 90T)</div></div>
     <div class="stat"><div class="v" id="sWkg">–</div><div class="l">W/kg @ FTP</div></div>
-    <div class="stat"><div class="v" id="sLast">–</div><div class="l">Letzte Fahrt</div></div>
-    <div class="stat"><div class="v" id="sCount">–</div><div class="l">Fahrten gesamt</div></div>
+    <div class="stat"><div class="v" id="sYtd">–</div><div class="l">Jahres-km (Rad)</div></div>
+    <div class="stat"><div class="v" id="sCount">–</div><div class="l">Aktivitäten gesamt</div></div>
   </div>
 
   <h2>Stärken / Schwächen</h2>
@@ -83,8 +91,11 @@
   <h2>Charts</h2>
   <div class="card" id="charts"><span class="mut">lädt…</span></div>
 
+  <h2>Wochenverlauf (Stunden &amp; Work nach Sportart)</h2>
+  <div class="card" style="overflow-x:auto"><table id="weeks"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+
   <h2>Letzte Fahrten</h2>
-  <div class="card"><table id="rides"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+  <div class="card" style="overflow-x:auto"><table id="rides"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
 </div>
 
 <script>
@@ -161,7 +172,107 @@ async function pollRun(){
 function parseCSV(t){ const [h,...rows]=t.trim().split("\n").map(l=>l.split(","));
   return rows.map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]]))); }
 
+function row(label, val, unit){ if(val==null||val==="") val="–";
+  return `<div style="display:flex;justify-content:space-between;padding:5px 0;
+    border-bottom:1px solid var(--line)"><span class="mut">${label}</span>
+    <span><b>${val}</b> <span class="mut">${unit||""}</span></span></div>`; }
+function trip(label, mn, av, mx, unit){
+  const c=v=>v==null?"–":v;
+  return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+    <div class="mut" style="margin-bottom:2px">${label} <span style="float:right">${unit}</span></div>
+    <div style="display:flex;justify-content:space-between">
+      <span>min <b>${c(mn)}</b></span><span>Ø <b>${c(av)}</b></span><span>max <b>${c(mx)}</b></span>
+    </div></div>`; }
+
+function rideCard(r){
+  return `<div class="card">
+    <div style="font-weight:600;margin-bottom:8px">${r.name||"Fahrt"} <span class="mut">· ${r.type||""}</span></div>
+    ${row("Dauer", r.duration, "h:m:s")}
+    ${row("Distanz", r.distance_km, "km")}
+    ${row("Ø Speed", r.avg_speed_kph, "kph")}
+    ${row("Kalorien", r.calories, "kcal")}
+    ${row("Höhenmeter", r.elevation_gain_m, "m")}
+    ${row("TSS", r.tss, "")}
+    ${row("IF", r.if, "")}
+    ${row("Normalized Power", r.np_w, "W")}
+    ${row("NP / kg", r.np_per_kg, "W/kg")}
+    ${row("% FTP", r.ftp_pct, "%")}
+    ${row("Variabilität (VI)", r.vi, "")}
+    ${row("Work", r.work_kj, "kJ")}
+    ${row("EF (NP/HF)", r.ef, "")}
+    ${trip("Herzfrequenz", r.hr?.min, r.hr?.avg, r.hr?.max, "bpm")}
+    ${trip("Power", r.power?.min, r.power?.avg, r.power?.max, "W")}
+    ${row("Best 1 min", r.power?.best_1min, "W")}
+    ${row("Best 5 min", r.power?.best_5min, "W")}
+    ${row("Best 20 min", r.power?.best_20min, "W")}
+  </div>`;
+}
+
+function fmtW(v){ return v==null?"–":Math.round(v); }
+
+function renderWeek(cw){
+  const el=document.getElementById("week");
+  if(!cw){ el.innerHTML='<span class="mut">Noch keine Wochendaten – einmal aktualisieren.</span>'; return; }
+  el.innerHTML =
+    row("Duration", cw.duration, "h:m") +
+    row("Distance", cw.distance_km, "km") +
+    row("TSS", cw.tss, "") +
+    row("Bike", cw.bike_km, "km") +
+    row("El. Gain", cw.elevation_gain_m, "m") +
+    row("Work", cw.work_kj, "kJ");
+}
+
+const SPORT_SHORT={Radfahren:"Rad",Laufen:"Lauf",Gehen:"Geh",Schwimmen:"Schw",Krafttraining:"Kraft"};
+function renderWeeks(wk){
+  const el=document.getElementById("weeks");
+  if(!wk||!wk.weeks?.length){ el.innerHTML='<tbody><tr><td class="mut">noch keine Daten</td></tr></tbody>'; return; }
+  const sports=wk.sports||["Radfahren","Laufen","Gehen","Schwimmen","Krafttraining"];
+  const head="<thead><tr><th>Woche</th><th>Ges. h</th><th>Work kJ</th>"
+    +sports.map(s=>`<th>${SPORT_SHORT[s]||s}</th>`).join("")+"</tr></thead>";
+  const body=wk.weeks.map(w=>{
+    const cells=sports.map(s=>{ const v=w.sports?.[s]; return `<td>${v?v.duration:"–"}</td>`; }).join("");
+    return `<tr><td>${w.week_start.slice(5)}</td><td><b>${w.duration}</b></td>`
+      +`<td>${w.work_kj}</td>${cells}</tr>`;
+  }).join("");
+  el.innerHTML=head+"<tbody>"+body+"</tbody>";
+}
+
 async function loadAll(){
+  // Digest (Form, EF) + Heute-Karten — token-frei vorberechnet
+  const digTxt=await getFile("data/digest.json");
+  let digest=null;
+  if(digTxt){ digest=JSON.parse(digTxt);
+    const tsb=digest.form?.tsb;
+    document.getElementById("sTsb").textContent=(tsb??"–")+(tsb!=null?"":"");
+    document.getElementById("sEf").textContent=
+      (digest.ef?.latest??"–")+(digest.ef?.trend?" · "+digest.ef.trend:"");
+    document.getElementById("sYtd").textContent=digest.volume?.km_ytd??"–";
+    renderWeek(digest.current_week);
+    // Letzte Fahrten aus dem reichen recent_rides (Rad)
+    const rr=(digest.recent_rides||[]).slice().reverse();
+    if(rr.length){
+      document.getElementById("rides").innerHTML=
+        "<thead><tr><th>Datum</th><th>km</th><th>Dauer</th><th>NP</th><th>TSS</th>"
+        +"<th>IF</th><th>Ø W</th><th>B5'</th><th>B20'</th><th>ØHF</th></tr></thead><tbody>"
+        +rr.map(r=>`<tr><td>${r.date}</td><td>${r.km??"–"}</td><td>${r.duration??"–"}</td>
+          <td>${fmtW(r.np)}</td><td>${r.tss??"–"}</td><td>${r.if??"–"}</td>
+          <td>${fmtW(r.avg_w)}</td><td>${fmtW(r.best_5min)}</td><td>${fmtW(r.best_20min)}</td>
+          <td>${r.avg_hr?Math.round(r.avg_hr):"–"}</td></tr>`).join("")+"</tbody>";
+    }
+  }
+  // Wochenverlauf nach Sportart
+  const wkTxt=await getFile("data/weekly.json");
+  if(wkTxt) renderWeeks(JSON.parse(wkTxt));
+  const dailyTxt=await getFile("data/daily.json");
+  const todayKey=new Date().toISOString().slice(0,10);
+  const todayCont=document.getElementById("today");
+  if(dailyTxt){ const daily=JSON.parse(dailyTxt);
+    const day=daily[todayKey];
+    todayCont.innerHTML=(day && day.rides.length)
+      ? day.rides.map(rideCard).join("")
+      : '<div class="card"><span class="mut">Heute noch keine Fahrt.</span></div>';
+  }
+
   // Power-Profil
   const pcTxt=await getFile("data/power_curve.json");
   if(pcTxt){ const pc=JSON.parse(pcTxt);
@@ -180,20 +291,13 @@ async function loadAll(){
       +(pc.curve||[]).map(c=>`<tr><td>${c.label}</td><td>${c.best_w}</td>
         <td>${c.w_per_kg??"–"}</td><td class="mut">${c.date??""}</td></tr>`).join("")+"</tbody>";
   }
-  // Fahrten
+  // Gesamtzahl Aktivitäten (alle Sportarten)
   const csv=await getFile("data/activities.csv");
   if(csv){ const rows=parseCSV(csv);
     document.getElementById("sCount").textContent=rows.length;
-    const last=rows[rows.length-1];
-    document.getElementById("sLast").textContent=last?last.distance_km+" km":"–";
-    const recent=rows.slice(-12).reverse();
-    document.getElementById("rides").innerHTML=
-      "<thead><tr><th>Datum</th><th>km</th><th>NP</th><th>TSS</th></tr></thead><tbody>"
-      +recent.map(r=>`<tr><td>${r.date}</td><td>${r.distance_km}</td>
-        <td>${r.weighted_avg_power_w||"–"}</td><td>${r.tss||"–"}</td></tr>`).join("")+"</tbody>";
   }
   // Charts
-  const imgs=["load_ctl_atl","power_curve","wkg_trend","distance_per_week"];
+  const imgs=["load_ctl_atl","ef_trend","power_curve","wkg_trend","distance_per_week"];
   const cont=document.getElementById("charts"); cont.innerHTML="";
   for(const name of imgs){ const src=await getImg("data/"+name+".png");
     if(src){ const im=document.createElement("img"); im.src=src; cont.appendChild(im); } }
