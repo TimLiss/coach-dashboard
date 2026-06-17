@@ -54,7 +54,7 @@
   <input id="token" type="password" placeholder="github_pat_…">
   <button onclick="saveCfg()">Verbinden</button>
   <p class="mut" style="margin-top:10px">Token-Rechte: <b>Actions: Read&amp;Write</b> und
-  <b>Contents: Read</b> auf dein Repo. Wird nur lokal im Browser gespeichert.</p>
+  <b>Contents: Read&amp;Write</b> auf dein Repo. Wird nur lokal im Browser gespeichert.</p>
 </div>
 
 <!-- Dashboard -->
@@ -64,6 +64,20 @@
     <div id="runStatus"></div>
     <button class="sec" style="margin-top:10px" onclick="loadAll()">Daten neu laden</button>
     <button class="sec" style="margin-top:8px" onclick="logout()">Abmelden / Zugang ändern</button>
+  </div>
+
+  <h2>Meine Werte</h2>
+  <div class="card">
+    <div class="grid">
+      <div><label>FTP (W)</label><input id="aFtp" type="number" inputmode="numeric"></div>
+      <div><label>Gewicht (kg)</label><input id="aWeight" type="number" inputmode="decimal"></div>
+      <div><label>Größe (cm)</label><input id="aHeight" type="number" inputmode="numeric"></div>
+      <div><label>HFmax (bpm)</label><input id="aHrmax" type="number" inputmode="numeric"></div>
+    </div>
+    <button onclick="saveAthlete()">Werte speichern</button>
+    <div id="athleteStatus"></div>
+    <p class="mut" style="margin-top:8px">Keine Geheimnisse – nur deine Trainingswerte.
+    Wirken beim nächsten „Aktualisieren". Braucht Token-Recht <b>Contents: Read&amp;Write</b>.</p>
   </div>
 
   <h2>Heute</h2>
@@ -110,6 +124,32 @@ function gh(path, opts={}) {
   });
 }
 function b64utf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g,"")))); }
+function utf8b64(s){ return btoa(unescape(encodeURIComponent(s))); }
+
+let athleteSha=null;
+async function loadAthlete(){
+  const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`);
+  if(!r.ok) return;
+  const j=await r.json(); athleteSha=j.sha;
+  const a=JSON.parse(b64utf8(j.content));
+  const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.value=v;};
+  set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm); set("aHrmax",a.hr_max);
+}
+async function saveAthlete(){
+  const num=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:Number(v);};
+  const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),hr_max:num("aHrmax")};
+  const st=document.getElementById("athleteStatus");
+  const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
+    method:"PUT",
+    body:JSON.stringify({message:"athlete.json via Dashboard",
+      content:utf8b64(JSON.stringify(body,null,2)+"\n"),
+      sha:athleteSha||undefined, branch:cfg.branch})
+  });
+  if(r.ok){ athleteSha=(await r.json()).content.sha;
+    st.className="status ok"; st.textContent="Gespeichert. Beim nächsten Aktualisieren aktiv.";
+  } else { st.className="status err";
+    st.textContent="Fehler "+r.status+" (Token braucht Contents: Read&Write)"; }
+}
 
 async function getFile(path){
   const r = await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/${path}`);
@@ -238,6 +278,7 @@ function renderWeeks(wk){
 }
 
 async function loadAll(){
+  loadAthlete();
   // Digest (Form, EF) + Heute-Karten — token-frei vorberechnet
   const digTxt=await getFile("data/digest.json");
   let digest=null;
