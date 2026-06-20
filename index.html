@@ -281,6 +281,9 @@ function renderWeeks(wk){
 }
 
 const WD=["So","Mo","Di","Mi","Do","Fr","Sa"];
+// LOKALES Datum als YYYY-MM-DD (nicht toISOString -> sonst Zeitzonen-Versatz!)
+function localKey(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
+  +"-"+String(d.getDate()).padStart(2,"0"); }
 function fmtMin(m){ if(m==null) return null;
   const h=Math.floor(m/60), mm=m%60;
   return h? (h+":"+String(mm).padStart(2,"0")+" h") : (mm+" min"); }
@@ -311,7 +314,7 @@ function renderPlan(plan){
   const cards=[];
   for(let i=0;i<28;i++){
     const d=new Date(today); d.setDate(today.getDate()+i);
-    const key=d.toISOString().slice(0,10);
+    const key=localKey(d);
     const entries=days[key];
     if(!entries||!entries.length) continue;
     const label=`${WD[d.getDay()]} ${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`
@@ -356,7 +359,7 @@ async function loadAll(){
   const wkTxt=await getFile("data/weekly.json");
   if(wkTxt) renderWeeks(JSON.parse(wkTxt));
   const dailyTxt=await getFile("data/daily.json");
-  const todayKey=new Date().toISOString().slice(0,10);
+  const todayKey=localKey(new Date());
   const todayCont=document.getElementById("today");
   if(dailyTxt){ const daily=JSON.parse(dailyTxt);
     const day=daily[todayKey];
