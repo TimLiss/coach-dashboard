@@ -73,6 +73,7 @@
       <div><label>Gewicht (kg)</label><input id="aWeight" type="number" inputmode="decimal"></div>
       <div><label>Größe (cm)</label><input id="aHeight" type="number" inputmode="numeric"></div>
       <div><label>HFmax (bpm)</label><input id="aHrmax" type="number" inputmode="numeric"></div>
+      <div><label>LTHR / Schwellen-HF (bpm)</label><input id="aLthr" type="number" inputmode="numeric" placeholder="leer = ~88% HFmax"></div>
     </div>
     <button onclick="saveAthlete()">Werte speichern</button>
     <div id="athleteStatus"></div>
@@ -136,11 +137,13 @@ async function loadAthlete(){
   const j=await r.json(); athleteSha=j.sha;
   const a=JSON.parse(b64utf8(j.content));
   const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.value=v;};
-  set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm); set("aHrmax",a.hr_max);
+  set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm);
+  set("aHrmax",a.hr_max); set("aLthr",a.lthr);
 }
 async function saveAthlete(){
   const num=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:Number(v);};
-  const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),hr_max:num("aHrmax")};
+  const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),
+    hr_max:num("aHrmax"),lthr:num("aLthr")};
   const st=document.getElementById("athleteStatus");
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
     method:"PUT",
@@ -265,6 +268,27 @@ function renderWeek(cw){
     row("Work", cw.work_kj, "kJ");
 }
 
+function renderWeekZones(cur){
+  if(!cur||!cur.time_in_zone) return;
+  const el=document.getElementById("week");
+  const block=(title,zones)=>{
+    if(!zones) return "";
+    const max=Math.max(...Object.values(zones).map(z=>z.min),1);
+    return `<div style="margin-top:10px"><div class="mut" style="font-size:12px;margin-bottom:4px">${title}</div>`
+      + Object.entries(zones).map(([z,v])=>
+        `<div style="display:flex;align-items:center;gap:8px;padding:2px 0">
+          <span style="width:104px;font-size:13px">${z}</span>
+          <div class="bar" style="flex:1;margin:0"><i style="width:${Math.round(v.min/max*100)}%"></i></div>
+          <span style="width:46px;text-align:right;font-size:13px"><b>${v.duration}</b></span>
+        </div>`).join("") + `</div>`;
+  };
+  el.innerHTML += `<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:6px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:4px">Zeit in Zonen</div>
+    ${block("Power (% FTP)",cur.time_in_zone.power)}
+    ${block("Herzfrequenz (% LTHR)",cur.time_in_zone.hr)}
+  </div>`;
+}
+
 const SPORT_SHORT={Radfahren:"Rad",Laufen:"Lauf",Gehen:"Geh",Schwimmen:"Schw",Krafttraining:"Kraft"};
 function renderWeeks(wk){
   const el=document.getElementById("weeks");
@@ -357,7 +381,7 @@ async function loadAll(){
   }
   // Wochenverlauf nach Sportart
   const wkTxt=await getFile("data/weekly.json");
-  if(wkTxt) renderWeeks(JSON.parse(wkTxt));
+  if(wkTxt){ const wk=JSON.parse(wkTxt); renderWeeks(wk); renderWeekZones(wk.current); }
   const dailyTxt=await getFile("data/daily.json");
   const todayKey=localKey(new Date());
   const todayCont=document.getElementById("today");
