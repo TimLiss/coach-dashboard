@@ -86,6 +86,9 @@
   <h2>Diese Woche</h2>
   <div class="card" id="week"><span class="mut">lädt…</span></div>
 
+  <h2>Trainingsplan (4 Wochen)</h2>
+  <div id="plan"><div class="card"><span class="mut">lädt…</span></div></div>
+
   <h2>Aktuelle Form</h2>
   <div class="grid">
     <div class="stat"><div class="v" id="sTsb">–</div><div class="l">Form (TSB)</div></div>
@@ -277,8 +280,56 @@ function renderWeeks(wk){
   el.innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 
+const WD=["So","Mo","Di","Mi","Do","Fr","Sa"];
+function fmtMin(m){ if(m==null) return null;
+  const h=Math.floor(m/60), mm=m%60;
+  return h? (h+":"+String(mm).padStart(2,"0")+" h") : (mm+" min"); }
+function ivLine(iv){
+  const on=`${iv.reps}× ${iv.on_min}:00`
+    + (iv.on_w?` @ ${iv.on_w} W`:"") + (iv.on_hr?` · HF ${iv.on_hr}`:"");
+  const off=iv.off_min!=null
+    ? ` / Pause ${iv.off_min}:00` + (iv.off_w?` @ ${iv.off_w} W`:"") + (iv.off_hr?` · HF ${iv.off_hr}`:"")
+    : "";
+  return `<div style="padding:3px 0">🔥 ${on}<span class="mut">${off}</span></div>`;
+}
+function planEntry(e){
+  const meta=[];
+  if(e.duration_min!=null) meta.push(fmtMin(e.duration_min));
+  if(e.target_w) meta.push("🎯 "+e.target_w+" W");
+  if(e.target_hr) meta.push("HF "+e.target_hr);
+  return `<div style="margin:6px 0">
+    <div style="font-weight:600">${e.name||"Training"}${e.type?` <span class="mut">· ${e.type}</span>`:""}</div>
+    ${meta.length?`<div class="mut" style="font-size:13px">${meta.join(" · ")}</div>`:""}
+    ${(e.intervals||[]).map(ivLine).join("")}
+    ${e.note?`<div class="mut" style="font-size:13px;font-style:italic">${e.note}</div>`:""}
+  </div>`;
+}
+function renderPlan(plan){
+  const el=document.getElementById("plan");
+  const days=(plan&&plan.days)||{};
+  const today=new Date(); today.setHours(0,0,0,0);
+  const cards=[];
+  for(let i=0;i<28;i++){
+    const d=new Date(today); d.setDate(today.getDate()+i);
+    const key=d.toISOString().slice(0,10);
+    const entries=days[key];
+    if(!entries||!entries.length) continue;
+    const label=`${WD[d.getDay()]} ${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`
+      + (i===0?" · heute":"");
+    cards.push(`<div class="card">
+      <div style="font-size:13px;color:var(--acc);font-weight:600;margin-bottom:4px">${label}</div>
+      ${entries.map(planEntry).join("")}
+    </div>`);
+  }
+  el.innerHTML = cards.length ? cards.join("")
+    : '<div class="card"><span class="mut">Noch kein Plan eingetragen. Sag Claude im Chat z.B. „trag Dienstag 4×5min SwSp ein".</span></div>';
+}
+
 async function loadAll(){
   loadAthlete();
+  // Trainingsplan (kommende 4 Wochen)
+  const planTxt=await getFile("data/plan.json");
+  renderPlan(planTxt?JSON.parse(planTxt):null);
   // Digest (Form, EF) + Heute-Karten — token-frei vorberechnet
   const digTxt=await getFile("data/digest.json");
   let digest=null;
