@@ -1,0 +1,41 @@
+name: Dashboard aktualisieren
+
+# Holt docs/index.html aus dem privaten Repo (strava-data-pull) und committet sie
+# hier, wenn sie sich geaendert hat. So entfaellt das manuelle Kopieren.
+on:
+  workflow_dispatch:            # "Run workflow"-Knopf (sofort)
+  schedule:
+    - cron: "0 */6 * * *"       # zusaetzlich alle 6h als Sicherheitsnetz
+
+permissions:
+  contents: write               # darf index.html hier committen (Standard-GITHUB_TOKEN)
+
+concurrency:
+  group: dash-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: index.html aus privatem Repo holen
+        env:
+          GH_TOKEN: ${{ secrets.COACH_DASH }}   # PAT mit Contents:Read auf strava-data-pull
+        run: |
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "User-Agent: coach-dashboard-sync" \
+            "https://api.github.com/repos/TimLiss/strava-data-pull/contents/docs/index.html?ref=main" \
+            -o index.html
+
+      - name: Committen, wenn geaendert
+        run: |
+          git config user.name "dash-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && { echo "keine Aenderung – nichts zu tun"; exit 0; }
+          git commit -m "Dashboard sync aus strava-data-pull ($(date -u +%Y-%m-%dT%H:%MZ))"
+          git push
