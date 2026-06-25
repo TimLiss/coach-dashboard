@@ -114,6 +114,9 @@
 
   <h2>Letzte Fahrten</h2>
   <div class="card" style="overflow-x:auto"><table id="rides"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+
+  <h2>Andere Sportarten (Lauf / Schwimmen / Kraft)</h2>
+  <div id="sessions"><div class="card"><span class="mut">lädt…</span></div></div>
 </div>
 
 <script>
@@ -256,6 +259,37 @@ function rideCard(r){
 
 function fmtW(v){ return v==null?"–":Math.round(v); }
 
+const SPORT_ICON={Laufen:"🏃",Schwimmen:"🏊",Gehen:"🚶",Krafttraining:"🏋️",Radfahren:"🚴"};
+function sessionCard(s){
+  return `<div class="card">
+    <div style="font-weight:600;margin-bottom:8px">${SPORT_ICON[s.sport]||""} ${s.name||s.sport||"Einheit"}
+      <span class="mut">· ${s.sport||s.type||""}</span></div>
+    ${row("Dauer", s.duration, "h:m:s")}
+    ${row("Distanz", s.distance_km, "km")}
+    ${s.pace?row("Pace", s.pace, s.pace_unit||""):""}
+    ${row("Ø Speed", s.avg_speed_kph, "kph")}
+    ${row("Höhenmeter", s.elevation_gain_m, "m")}
+    ${row("Kalorien", s.calories, "kcal")}
+    ${row("Ø Kadenz", s.avg_cadence, "")}
+    ${row("Relative Effort", s.relative_effort, "")}
+    ${trip("Herzfrequenz", s.hr?.min, s.hr?.avg, s.hr?.max, "bpm")}
+  </div>`;
+}
+function renderSessions(data){
+  const el=document.getElementById("sessions");
+  const list=(data&&data.sessions)||[];
+  const sum=(data&&data.summary_28d)||{};
+  const sumKeys=Object.keys(sum);
+  const head=sumKeys.length
+    ? `<div class="card"><div class="mut" style="font-size:12px;margin-bottom:6px">Letzte 28 Tage</div>`
+      + sumKeys.map(s=>row(`${SPORT_ICON[s]||""} ${s}`,
+          `${sum[s].count}× · ${sum[s].duration} h`+(sum[s].distance_km?` · ${sum[s].distance_km} km`:""),"")).join("")
+      + `</div>` : "";
+  el.innerHTML = head + (list.length
+    ? list.map(sessionCard).join("")
+    : (sumKeys.length?"":'<div class="card"><span class="mut">Noch keine Lauf-/Schwimm-/Kraft-Einheiten. Sobald du eine auf Strava hochlädst, erscheint sie hier.</span></div>'));
+}
+
 function renderWeek(cw){
   const el=document.getElementById("week");
   if(!cw){ el.innerHTML='<span class="mut">Noch keine Wochendaten – einmal aktualisieren.</span>'; return; }
@@ -382,14 +416,17 @@ async function loadAll(){
   // Wochenverlauf nach Sportart
   const wkTxt=await getFile("data/weekly.json");
   if(wkTxt){ const wk=JSON.parse(wkTxt); renderWeeks(wk); renderWeekZones(wk.current); }
+  // Andere Sportarten (Lauf/Schwimmen/Kraft)
+  const sessTxt=await getFile("data/sessions.json");
+  renderSessions(sessTxt?JSON.parse(sessTxt):null);
   const dailyTxt=await getFile("data/daily.json");
   const todayKey=localKey(new Date());
   const todayCont=document.getElementById("today");
   if(dailyTxt){ const daily=JSON.parse(dailyTxt);
     const day=daily[todayKey];
     todayCont.innerHTML=(day && day.rides.length)
-      ? day.rides.map(rideCard).join("")
-      : '<div class="card"><span class="mut">Heute noch keine Fahrt.</span></div>';
+      ? day.rides.map(c=>c.kind==="session"?sessionCard(c):rideCard(c)).join("")
+      : '<div class="card"><span class="mut">Heute noch keine Einheit.</span></div>';
   }
 
   // Power-Profil
