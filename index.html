@@ -76,6 +76,7 @@
       <div><label>LTHR Rad (bpm)</label><input id="aLthr" type="number" inputmode="numeric" placeholder="leer = ~88% HFmax"></div>
       <div><label>LTHR Laufen (bpm)</label><input id="aRunLthr" type="number" inputmode="numeric" placeholder="leer = Rad-LTHR +7"></div>
       <div><label>Schwellen-Pace Lauf (m:ss/km)</label><input id="aThrPace" type="text" inputmode="text" placeholder="z.B. 4:30"></div>
+      <div><label>Ziel FTP (W/kg)</label><input id="aTargetWkg" type="number" inputmode="decimal" step="0.1" placeholder="z.B. 4.0"></div>
     </div>
     <button onclick="saveAthlete()">Werte speichern</button>
     <div id="athleteStatus"></div>
@@ -101,6 +102,9 @@
     <div class="stat"><div class="v" id="sYtd">–</div><div class="l">Jahres-km (Rad)</div></div>
     <div class="stat"><div class="v" id="sCount">–</div><div class="l">Aktivitäten gesamt</div></div>
   </div>
+
+  <h2>Diagnostik / Benchmark</h2>
+  <div id="diag"><div class="card"><span class="mut">lädt…</span></div></div>
 
   <h2>Stärken / Schwächen</h2>
   <div class="card" id="profile"><span class="mut">lädt…</span></div>
@@ -147,14 +151,14 @@ async function loadAthlete(){
   const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.value=v;};
   set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm);
   set("aHrmax",a.hr_max); set("aLthr",a.lthr);
-  set("aRunLthr",a.run_lthr); set("aThrPace",a.threshold_pace);
+  set("aRunLthr",a.run_lthr); set("aThrPace",a.threshold_pace); set("aTargetWkg",a.target_w_per_kg);
 }
 async function saveAthlete(){
   const num=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:Number(v);};
   const str=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:v;};
   const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),
     hr_max:num("aHrmax"),lthr:num("aLthr"),
-    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace")};
+    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace"),target_w_per_kg:num("aTargetWkg")};
   const st=document.getElementById("athleteStatus");
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
     method:"PUT",
@@ -259,13 +263,55 @@ function rideCard(r){
     ${row("EF (NP/HF)", r.ef, "")}
     ${trip("Herzfrequenz", r.hr?.min, r.hr?.avg, r.hr?.max, "bpm")}
     ${trip("Power", r.power?.min, r.power?.avg, r.power?.max, "W")}
-    ${row("Best 1 min", r.power?.best_1min, "W")}
-    ${row("Best 5 min", r.power?.best_5min, "W")}
-    ${row("Best 20 min", r.power?.best_20min, "W")}
+    ${bestRow("Best 1 min", r.power?.best_1min, r.power?.best_1min_90d)}
+    ${bestRow("Best 5 min", r.power?.best_5min, r.power?.best_5min_90d)}
+    ${bestRow("Best 20 min", r.power?.best_20min, r.power?.best_20min_90d)}
   </div>`;
+}
+// Best-in-Fahrt + 90-Tage-Bestwert als Referenz dahinter
+function bestRow(label, val, best90){
+  const unit = "W" + (best90!=null ? ` · 90T-Best ${fmtW(best90)}` : "");
+  return row(label, fmtW(val), unit);
 }
 
 function fmtW(v){ return v==null?"–":Math.round(v); }
+
+function renderDiag(data){
+  const el=document.getElementById("diag");
+  const bm=data&&data.latest;
+  if(!bm){
+    const p=(data&&data.protokoll)||null;
+    el.innerHTML='<div class="card"><span class="mut">Noch keine Diagnostik gefahren.</span>'
+      +(p?`<div style="margin-top:8px;font-size:13px"><b>Testprotokoll</b><br>
+        <span class="mut">Tag 1:</span> ${p.tag1.join(" · ")}<br>
+        <span class="mut">Tag 2:</span> ${p.tag2.join(" · ")}</div>
+        <div class="mut" style="margin-top:8px;font-size:12px">Sag Claude „trag mir die Diagnostik ein" – er plant die Testtage.</div>`:"")
+      +'</div>';
+    return;
+  }
+  const hist=(data.history||[]);
+  const prev=hist.length>1?hist[hist.length-2]:null;
+  const delta=(k,unit="")=>{ if(!prev||prev[k]==null||bm[k]==null) return "";
+    const d=Math.round((bm[k]-prev[k])*10)/10; return d?` <span class="mut">(${d>0?"+":""}${d}${unit} vs. ${prev.date})</span>`:""; };
+  const gap = bm.gap_w_per_kg!=null
+    ? `<div class="status ${bm.gap_w_per_kg<=0?"ok":"warn"}" style="margin-top:6px">
+        Ziel ${bm.target_w_per_kg} W/kg (${bm.target_w} W) · ${bm.gap_w_per_kg<=0?"erreicht 🎉":`noch ${bm.gap_w_per_kg} W/kg (${bm.gap_w} W)`}</div>` : "";
+  el.innerHTML=`<div class="card">
+    <div style="font-weight:600;margin-bottom:6px">Letzte Diagnostik · <span class="mut">${bm.date}</span></div>
+    ${row("FTP", `${bm.ftp_w} W · ${bm.w_per_kg} W/kg`+delta("w_per_kg"," W/kg"), "")}
+    ${row("CP (Critical Power)", bm.cp_w, "W")}
+    ${row("W′ (Anaerobkapazität)", bm.w_prime_kj, "kJ")}
+    ${row("VO₂max (geschätzt)", bm.vo2max_est+delta("vo2max_est"), "ml/kg/min")}
+    ${row("Sprint Peak", bm.sprint_w, "W")}
+    ${row("2 min", bm.p2min_w, "W")}
+    ${row("5 min", bm.p5min_w, "W")}
+    ${row(bm.p_long_label||"lang", bm.p_long_w, "W")}
+    ${row("Phänotyp", bm.phenotype, "")}
+    ${row("Durability", `${bm.durability_index} · ${bm.durability_note}`, "")}
+    ${gap}
+    ${hist.length>1?`<div class="mut" style="font-size:12px;margin-top:8px">${hist.length} Diagnostiken seit ${hist[0].date}</div>`:""}
+  </div>`;
+}
 
 const SPORT_ICON={Laufen:"🏃",Schwimmen:"🏊",Gehen:"🚶",Krafttraining:"🏋️",Radfahren:"🚴"};
 function zoneMini(title, zones){
@@ -446,6 +492,9 @@ async function loadAll(){
   // Andere Sportarten (Lauf/Schwimmen/Kraft)
   const sessTxt=await getFile("data/sessions.json");
   renderSessions(sessTxt?JSON.parse(sessTxt):null);
+  // Diagnostik / Benchmark
+  const bmTxt=await getFile("data/benchmarks.json");
+  renderDiag(bmTxt?JSON.parse(bmTxt):null);
   // Lauf-Bestzeiten
   const rcTxt=await getFile("data/run_curve.json");
   const rbEl=document.getElementById("runbests");
