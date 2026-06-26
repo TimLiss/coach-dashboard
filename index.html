@@ -73,7 +73,9 @@
       <div><label>Gewicht (kg)</label><input id="aWeight" type="number" inputmode="decimal"></div>
       <div><label>Größe (cm)</label><input id="aHeight" type="number" inputmode="numeric"></div>
       <div><label>HFmax (bpm)</label><input id="aHrmax" type="number" inputmode="numeric"></div>
-      <div><label>LTHR / Schwellen-HF (bpm)</label><input id="aLthr" type="number" inputmode="numeric" placeholder="leer = ~88% HFmax"></div>
+      <div><label>LTHR Rad (bpm)</label><input id="aLthr" type="number" inputmode="numeric" placeholder="leer = ~88% HFmax"></div>
+      <div><label>LTHR Laufen (bpm)</label><input id="aRunLthr" type="number" inputmode="numeric" placeholder="leer = Rad-LTHR +7"></div>
+      <div><label>Schwellen-Pace Lauf (m:ss/km)</label><input id="aThrPace" type="text" inputmode="text" placeholder="z.B. 4:30"></div>
     </div>
     <button onclick="saveAthlete()">Werte speichern</button>
     <div id="athleteStatus"></div>
@@ -115,6 +117,9 @@
   <h2>Letzte Fahrten</h2>
   <div class="card" style="overflow-x:auto"><table id="rides"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
 
+  <h2>Lauf-Bestzeiten</h2>
+  <div class="card" style="overflow-x:auto"><table id="runbests"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
+
   <h2>Andere Sportarten (Lauf / Schwimmen / Kraft)</h2>
   <div id="sessions"><div class="card"><span class="mut">lädt…</span></div></div>
 </div>
@@ -142,11 +147,14 @@ async function loadAthlete(){
   const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.value=v;};
   set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm);
   set("aHrmax",a.hr_max); set("aLthr",a.lthr);
+  set("aRunLthr",a.run_lthr); set("aThrPace",a.threshold_pace);
 }
 async function saveAthlete(){
   const num=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:Number(v);};
+  const str=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:v;};
   const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),
-    hr_max:num("aHrmax"),lthr:num("aLthr")};
+    hr_max:num("aHrmax"),lthr:num("aLthr"),
+    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace")};
   const st=document.getElementById("athleteStatus");
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
     method:"PUT",
@@ -260,19 +268,38 @@ function rideCard(r){
 function fmtW(v){ return v==null?"–":Math.round(v); }
 
 const SPORT_ICON={Laufen:"🏃",Schwimmen:"🏊",Gehen:"🚶",Krafttraining:"🏋️",Radfahren:"🚴"};
+function zoneMini(title, zones){
+  if(!zones) return "";
+  const max=Math.max(...Object.values(zones),1);
+  return `<div style="margin-top:8px"><div class="mut" style="font-size:12px;margin-bottom:4px">${title}</div>`
+    + Object.entries(zones).map(([z,v])=>
+      `<div style="display:flex;align-items:center;gap:8px;padding:1px 0">
+        <span style="width:104px;font-size:12px">${z}</span>
+        <div class="bar" style="flex:1;margin:0"><i style="width:${Math.round(v/max*100)}%"></i></div>
+        <span style="width:40px;text-align:right;font-size:12px">${v}%</span></div>`).join("")+`</div>`;
+}
 function sessionCard(s){
+  const d=s.detail||{};
+  const be=(d.best_efforts||[]).map(b=>`${b.dist} <b>${b.time}</b>`).join(" · ");
+  const tz=d.time_in_zone||{};
   return `<div class="card">
     <div style="font-weight:600;margin-bottom:8px">${SPORT_ICON[s.sport]||""} ${s.name||s.sport||"Einheit"}
       <span class="mut">· ${s.sport||s.type||""}</span></div>
     ${row("Dauer", s.duration, "h:m:s")}
     ${row("Distanz", s.distance_km, "km")}
     ${s.pace?row("Pace", s.pace, s.pace_unit||""):""}
+    ${s.gap_pace?row("GAP (steigungsbereinigt)", s.gap_pace, "/km"):""}
     ${row("Ø Speed", s.avg_speed_kph, "kph")}
     ${row("Höhenmeter", s.elevation_gain_m, "m")}
     ${row("Kalorien", s.calories, "kcal")}
-    ${row("Ø Kadenz", s.avg_cadence, "")}
+    ${row("Ø Kadenz", s.avg_cadence, s.sport==="Laufen"?"spm":"")}
+    ${s.ef!=null?row("EF (GAP/HF)", s.ef, ""):""}
+    ${s.decoupling_pct!=null?row("Decoupling", s.decoupling_pct, "%"):""}
     ${row("Relative Effort", s.relative_effort, "")}
     ${trip("Herzfrequenz", s.hr?.min, s.hr?.avg, s.hr?.max, "bpm")}
+    ${be?`<div style="margin-top:8px"><div class="mut" style="font-size:12px;margin-bottom:2px">Bestzeiten in dieser Einheit</div><div style="font-size:13px">${be}</div></div>`:""}
+    ${zoneMini("Pace-Zonen (% Schwelle)", tz.pace)}
+    ${zoneMini("HF-Zonen (% Lauf-LTHR)", tz.hr)}
   </div>`;
 }
 function renderSessions(data){
@@ -419,6 +446,17 @@ async function loadAll(){
   // Andere Sportarten (Lauf/Schwimmen/Kraft)
   const sessTxt=await getFile("data/sessions.json");
   renderSessions(sessTxt?JSON.parse(sessTxt):null);
+  // Lauf-Bestzeiten
+  const rcTxt=await getFile("data/run_curve.json");
+  const rbEl=document.getElementById("runbests");
+  if(rcTxt){ const rc=JSON.parse(rcTxt); const at=rc.all_time||[];
+    const rec=Object.fromEntries((rc.recent_90d||[]).map(b=>[b.dist,b]));
+    rbEl.innerHTML = at.length
+      ? "<thead><tr><th>Distanz</th><th>Bestzeit</th><th>Pace</th><th>90 Tage</th></tr></thead><tbody>"
+        +at.map(b=>`<tr><td>${b.dist}</td><td><b>${b.time}</b></td><td>${b.pace}/km</td>
+          <td class="mut">${rec[b.dist]?rec[b.dist].time:"–"}</td></tr>`).join("")+"</tbody>"
+      : '<tbody><tr><td class="mut">Noch keine Laufdaten.</td></tr></tbody>';
+  }
   const dailyTxt=await getFile("data/daily.json");
   const todayKey=localKey(new Date());
   const todayCont=document.getElementById("today");
@@ -435,8 +473,15 @@ async function loadAll(){
     document.getElementById("sFtp").textContent=pc.ftp_estimate_w??"–";
     document.getElementById("sWkg").textContent=
       (pc.ftp_estimate_w&&pc.weight_kg)?(pc.ftp_estimate_w/pc.weight_kg).toFixed(2):"–";
+    // CP/W'-Modell als Kopfzeile über dem Profil
+    const cpLine=(pc.cp_w)
+      ? `<div class="card" style="margin-bottom:10px;padding:12px">
+          <div style="display:flex;justify-content:space-between"><span class="mut">Critical Power (CP)</span><b>${pc.cp_w} W</b></div>
+          <div style="display:flex;justify-content:space-between"><span class="mut">W′ (Anaerobkapazität)</span><b>${(pc.w_prime_j/1000).toFixed(1)} kJ</b></div>
+          <div style="display:flex;justify-content:space-between"><span class="mut">FTP aus CP</span><b>${pc.ftp_from_cp_w} W</b></div>
+        </div>` : "";
     // Profil-Balken
-    document.getElementById("profile").innerHTML=(pc.profile||[])
+    document.getElementById("profile").innerHTML=cpLine+(pc.profile||[])
       .sort((a,b)=>b.score_0_100-a.score_0_100).map(p=>
       `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between">
        <span>${p.system}</span><span class="mut">${p.w} W · ${p.w_per_kg} W/kg</span></div>
