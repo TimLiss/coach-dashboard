@@ -39,7 +39,14 @@
   a{color:var(--acc)}
   .bar{height:8px;background:#0c0e12;border-radius:5px;overflow:hidden;margin-top:4px}
   .bar>i{display:block;height:100%;background:var(--acc)}
+  .rngrow{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .rng{width:auto;flex:1;min-width:48px;padding:8px 6px;font-size:13px}
+  .rng.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .chartbox{position:relative;height:200px}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 </head>
 <body>
 <h1>🚴 Strava Coach</h1>
@@ -113,7 +120,23 @@
   <div class="card"><table id="best"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
 
   <h2>Charts</h2>
-  <div class="card" id="charts"><span class="mut">lädt…</span></div>
+  <div class="card">
+    <div class="rngrow" id="rngRow">
+      <button class="sec rng" data-d="42">6 Wo</button>
+      <button class="sec rng" data-d="90">3 Mon</button>
+      <button class="sec rng on" data-d="365">1 Jahr</button>
+      <button class="sec rng" data-d="0">Alles</button>
+      <button class="sec rng" onclick="resetZoom()">Zoom ⟲</button>
+    </div>
+    <div class="chartbox"><canvas id="cForm"></canvas></div>
+    <div class="mut" style="font-size:12px;text-align:center;margin-top:4px">Form · CTL (Fitness) / ATL (Ermüdung) / TSB</div>
+  </div>
+  <div class="card"><div class="chartbox" style="height:170px"><canvas id="cEf"></canvas></div>
+    <div class="mut" style="font-size:12px;text-align:center;margin-top:4px">Efficiency Factor (NP/HF) — aerobe Fitness</div></div>
+  <div class="card"><div class="chartbox" style="height:170px"><canvas id="cWeekly"></canvas></div>
+    <div class="mut" style="font-size:12px;text-align:center;margin-top:4px">Wochen-Kilometer (Rad)</div></div>
+  <div class="card"><div class="chartbox" style="height:190px"><canvas id="cPower"></canvas></div>
+    <div class="mut" style="font-size:12px;text-align:center;margin-top:4px">Power-Kurve · all-time vs. letzte 90 Tage (Tippen/Ziehen zum Zoomen)</div></div>
 
   <h2>Wochenverlauf (Stunden &amp; Work nach Sportart)</h2>
   <div class="card" style="overflow-x:auto"><table id="weeks"><tbody><tr><td class="mut">lädt…</td></tr></tbody></table></div>
@@ -546,13 +569,72 @@ async function loadAll(){
   if(csv){ const rows=parseCSV(csv);
     document.getElementById("sCount").textContent=rows.length;
   }
-  // Charts
-  const imgs=["load_ctl_atl","ef_trend","power_curve","wkg_trend","distance_per_week"];
-  const cont=document.getElementById("charts"); cont.innerHTML="";
-  for(const name of imgs){ const src=await getImg("data/"+name+".png");
-    if(src){ const im=document.createElement("img"); im.src=src; cont.appendChild(im); } }
-  if(!cont.children.length) cont.innerHTML='<span class="mut">Noch keine Charts – einmal aktualisieren.</span>';
+  // Interaktive Charts
+  const chTxt=await getFile("data/charts.json");
+  if(chTxt) renderCharts(JSON.parse(chTxt));
 }
+
+// ---------- Interaktive Charts (Chart.js + Zoom) ----------
+const CH={}; let CHART_DATA=null; let curDays=365;
+const COL={ctl:"#3fb950",atl:"#f85149",tsb:"#58a6ff",acc:"#fc5200",mut:"#9aa3b2",grid:"#1e2229"};
+(function regZoom(){ const z=window.ChartZoom||window["chartjs-plugin-zoom"]||window.chartjsPluginZoom;
+  if(window.Chart&&z){ try{ Chart.register(z); }catch(e){} } })();
+
+const ZOOM={ zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:"x"}, pan:{enabled:true,mode:"x"} };
+function baseOpts(){ return {
+  responsive:true, maintainAspectRatio:false, animation:false,
+  interaction:{intersect:false,mode:"index"},
+  plugins:{ legend:{labels:{boxWidth:12,font:{size:11},color:COL.mut}}, zoom:ZOOM },
+  scales:{ x:{ticks:{maxTicksLimit:7,autoSkip:true,maxRotation:0,font:{size:10},color:COL.mut},grid:{display:false}},
+           y:{ticks:{font:{size:10},color:COL.mut},grid:{color:COL.grid}} } }; }
+function ds(label,data,color,fill){ return {label,data,borderColor:color,
+  backgroundColor:fill||color,borderWidth:2,pointRadius:0,tension:.25,fill:!!fill}; }
+function sliceDays(arr,days){ if(!days) return arr;
+  const c=new Date(); c.setDate(c.getDate()-days); const cut=localKey(c);
+  return arr.filter(x=>x.date>=cut); }
+
+function renderCharts(data){
+  CHART_DATA=data;
+  if(!window.Chart){ document.getElementById("rngRow").insertAdjacentHTML("afterend",
+    '<div class="mut">Charts-Bibliothek konnte nicht geladen werden (Internet?).</div>'); return; }
+  Object.values(CH).forEach(c=>c&&c.destroy());
+  const f=sliceDays(data.form,curDays), e=sliceDays(data.ef,curDays), w=sliceDays(data.weekly,curDays);
+  CH.form=new Chart(document.getElementById("cForm"),{type:"line",
+    data:{labels:f.map(x=>x.date),datasets:[
+      ds("CTL",f.map(x=>x.ctl),COL.ctl), ds("ATL",f.map(x=>x.atl),COL.atl),
+      ds("TSB",f.map(x=>x.tsb),COL.tsb)]}, options:baseOpts()});
+  CH.ef=new Chart(document.getElementById("cEf"),{type:"line",
+    data:{labels:e.map(x=>x.date),datasets:[
+      {...ds("EF",e.map(x=>x.ef),COL.mut),borderWidth:1},
+      ds("EF Ø",e.map(x=>x.ef_avg),COL.acc)]}, options:baseOpts()});
+  CH.weekly=new Chart(document.getElementById("cWeekly"),{type:"bar",
+    data:{labels:w.map(x=>x.date),datasets:[{label:"km/Woche",data:w.map(x=>x.km),
+      backgroundColor:COL.acc,borderWidth:0}]}, options:baseOpts()});
+  // Power-Kurve (Dauer-basiert, nicht Zeit -> keine Range-Buttons)
+  const pc=data.power_curve||[], rec=data.power_recent_90d||{};
+  CH.power=new Chart(document.getElementById("cPower"),{type:"line",
+    data:{labels:pc.map(c=>c.label),datasets:[
+      ds("all-time",pc.map(c=>c.w),COL.mut),
+      ds("90 Tage",pc.map(c=>rec[String(c.duration_s)]??null),COL.acc)]},
+    options:{...baseOpts(),scales:{x:{ticks:{font:{size:10},color:COL.mut},grid:{display:false}},
+      y:{ticks:{font:{size:10},color:COL.mut},grid:{color:COL.grid}}}}});
+}
+function setRange(days,btn){
+  curDays=days;
+  document.querySelectorAll("#rngRow .rng[data-d]").forEach(b=>b.classList.remove("on"));
+  if(btn) btn.classList.add("on");
+  if(!CHART_DATA) return;
+  const upd=(ch,arr,cols)=>{ const s=sliceDays(arr,days);
+    ch.data.labels=s.map(x=>x.date);
+    ch.data.datasets.forEach((d,i)=>d.data=s.map(cols[i]));
+    ch.resetZoom(); ch.update(); };
+  upd(CH.form,CHART_DATA.form,[x=>x.ctl,x=>x.atl,x=>x.tsb]);
+  upd(CH.ef,CHART_DATA.ef,[x=>x.ef,x=>x.ef_avg]);
+  upd(CH.weekly,CHART_DATA.weekly,[x=>x.km]);
+}
+function resetZoom(){ Object.values(CH).forEach(c=>c&&c.resetZoom&&c.resetZoom()); }
+document.addEventListener("click",e=>{ const b=e.target.closest("#rngRow .rng[data-d]");
+  if(b) setRange(Number(b.dataset.d),b); });
 
 if(cfg) showApp();
 </script>
