@@ -369,7 +369,26 @@ function sessionCard(s){
     ${be?`<div style="margin-top:8px"><div class="mut" style="font-size:12px;margin-bottom:2px">Bestzeiten in dieser Einheit</div><div style="font-size:13px">${be}</div></div>`:""}
     ${zoneMini("Pace-Zonen (% Schwelle)", tz.pace)}
     ${zoneMini("HF-Zonen (% Lauf-LTHR)", tz.hr)}
+    ${runLaps(d.laps)}
   </div>`;
+}
+function runLaps(lb){
+  if(!lb||!lb.laps||!lb.laps.length) return "";
+  const ws=lb.work_set;
+  const head=ws?`<div class="mut" style="font-size:12px;margin-top:10px">
+    Intervalle: <b>${ws.n_intervals}× Ø ${ws.mean_pace}/km</b> · Decay ${ws.pace_decay_pct}%`
+    +(ws.hr_climb_bpm!=null?` · HF ${ws.hr_climb_bpm>0?"+":""}${ws.hr_climb_bpm} bpm`:"")+`</div>`
+    :`<div class="mut" style="font-size:12px;margin-top:10px">Runden</div>`;
+  const rows=lb.laps.map(l=>{
+    const w=l.kind==="work";
+    return `<tr style="${w?"color:var(--fg)":"color:var(--mut)"}">
+      <td>${w?"▲":"·"} ${l.lap}</td><td><b>${l.pace||"–"}</b></td>
+      <td>${l.avg_hr??"–"}/${l.max_hr??"–"}</td><td>${l.cadence_spm??"–"}</td>
+      <td>${l.hr_drift_pct!=null?(l.hr_drift_pct>0?"+":"")+l.hr_drift_pct+"%":"–"}</td></tr>`;
+  }).join("");
+  return head+`<table style="margin-top:4px;font-size:12px">
+    <thead><tr><th>Lap</th><th>Pace</th><th>HF ø/max</th><th>spm</th><th>HF-Drift</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
 }
 function renderSessions(data){
   const el=document.getElementById("sessions");
