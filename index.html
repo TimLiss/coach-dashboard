@@ -84,6 +84,8 @@
       <div><label>LTHR Laufen (bpm)</label><input id="aRunLthr" type="number" inputmode="numeric" placeholder="leer = Rad-LTHR +7"></div>
       <div><label>Schwellen-Pace Lauf (m:ss/km)</label><input id="aThrPace" type="text" inputmode="text" placeholder="z.B. 4:30"></div>
       <div><label>Ziel FTP (W/kg)</label><input id="aTargetWkg" type="number" inputmode="decimal" step="0.1" placeholder="z.B. 4.0"></div>
+      <div><label>Geburtsjahr</label><input id="aBirthYear" type="number" inputmode="numeric" placeholder="z.B. 1992"></div>
+      <div><label>Geschlecht</label><select id="aSex"><option value="">–</option><option value="male">männlich</option><option value="female">weiblich</option></select></div>
     </div>
     <button onclick="saveAthlete()">Werte speichern</button>
     <div id="athleteStatus"></div>
@@ -176,6 +178,7 @@ async function loadAthlete(){
   set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm);
   set("aHrmax",a.hr_max); set("aLthr",a.lthr);
   set("aRunLthr",a.run_lthr); set("aThrPace",a.threshold_pace); set("aTargetWkg",a.target_w_per_kg);
+  set("aBirthYear",a.birth_year); set("aSex",a.sex);
 }
 // Haengt bei geaendertem Wert einen datierten History-Eintrag an (heutiges
 // Datum). So verschiebt eine FTP-/Gewichts-Aenderung nicht rueckwirkend die
@@ -198,7 +201,8 @@ async function saveAthlete(){
   body.weight_history=pushHistory(body.weight_history,"weight_kg",newWeight);
   Object.assign(body,{ftp_w:newFtp,weight_kg:newWeight,height_cm:num("aHeight"),
     hr_max:num("aHrmax"),lthr:num("aLthr"),
-    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace"),target_w_per_kg:num("aTargetWkg")});
+    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace"),target_w_per_kg:num("aTargetWkg"),
+    birth_year:num("aBirthYear"),sex:str("aSex")});
   const st=document.getElementById("athleteStatus");
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
     method:"PUT",
