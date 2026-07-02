@@ -165,23 +165,40 @@ function gh(path, opts={}) {
 function b64utf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g,"")))); }
 function utf8b64(s){ return btoa(unescape(encodeURIComponent(s))); }
 
-let athleteSha=null;
+let athleteSha=null, athleteData={};
 async function loadAthlete(){
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`);
   if(!r.ok) return;
   const j=await r.json(); athleteSha=j.sha;
   const a=JSON.parse(b64utf8(j.content));
+  athleteData=a;  // volles Objekt merken -> Historie beim Speichern erhalten
   const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.value=v;};
   set("aFtp",a.ftp_w); set("aWeight",a.weight_kg); set("aHeight",a.height_cm);
   set("aHrmax",a.hr_max); set("aLthr",a.lthr);
   set("aRunLthr",a.run_lthr); set("aThrPace",a.threshold_pace); set("aTargetWkg",a.target_w_per_kg);
 }
+// Haengt bei geaendertem Wert einen datierten History-Eintrag an (heutiges
+// Datum). So verschiebt eine FTP-/Gewichts-Aenderung nicht rueckwirkend die
+// TSS/W-kg alter Fahrten. Mehrfach-Speichern am selben Tag -> Eintrag ersetzen.
+function pushHistory(list, valKey, newVal){
+  const arr = Array.isArray(list) ? list.slice() : [];
+  const last = arr.length ? arr[arr.length-1][valKey] : null;
+  if(newVal==null || newVal===last) return arr;
+  const today = new Date().toISOString().slice(0,10);
+  if(arr.length && arr[arr.length-1].from===today) arr[arr.length-1]={from:today,[valKey]:newVal};
+  else arr.push({from:today,[valKey]:newVal});
+  return arr;
+}
 async function saveAthlete(){
   const num=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:Number(v);};
   const str=id=>{const v=document.getElementById(id).value.trim(); return v===""?null:v;};
-  const body={ftp_w:num("aFtp"),weight_kg:num("aWeight"),height_cm:num("aHeight"),
+  const newFtp=num("aFtp"), newWeight=num("aWeight");
+  const body=Object.assign({}, athleteData);  // vorhandene Felder (inkl. Historie) uebernehmen
+  body.ftp_history=pushHistory(body.ftp_history,"ftp_w",newFtp);
+  body.weight_history=pushHistory(body.weight_history,"weight_kg",newWeight);
+  Object.assign(body,{ftp_w:newFtp,weight_kg:newWeight,height_cm:num("aHeight"),
     hr_max:num("aHrmax"),lthr:num("aLthr"),
-    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace"),target_w_per_kg:num("aTargetWkg")};
+    run_lthr:num("aRunLthr"),threshold_pace:str("aThrPace"),target_w_per_kg:num("aTargetWkg")});
   const st=document.getElementById("athleteStatus");
   const r=await gh(`/repos/${cfg.owner}/${cfg.repo}/contents/athlete.json`,{
     method:"PUT",
@@ -189,7 +206,7 @@ async function saveAthlete(){
       content:utf8b64(JSON.stringify(body,null,2)+"\n"),
       sha:athleteSha||undefined, branch:cfg.branch})
   });
-  if(r.ok){ athleteSha=(await r.json()).content.sha;
+  if(r.ok){ athleteSha=(await r.json()).content.sha; athleteData=body;
     st.className="status ok"; st.textContent="Gespeichert. Beim nächsten Aktualisieren aktiv.";
   } else { st.className="status err";
     st.textContent="Fehler "+r.status+" (Token braucht Contents: Read&Write)"; }
