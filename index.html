@@ -307,14 +307,22 @@ function rideCard(r){
     ${row("EF (NP/HF)", r.ef, "")}
     ${trip("Herzfrequenz", r.hr?.min, r.hr?.avg, r.hr?.max, "bpm")}
     ${trip("Power", r.power?.min, r.power?.avg, r.power?.max, "W")}
-    ${bestRow("Best 1 min", r.power?.best_1min, r.power?.best_1min_90d)}
-    ${bestRow("Best 5 min", r.power?.best_5min, r.power?.best_5min_90d)}
-    ${bestRow("Best 20 min", r.power?.best_20min, r.power?.best_20min_90d)}
+    ${bestRows(r.power)}
   </div>`;
 }
+// Alle Fahrt-Bestwerte (5s..60min) mit 90-Tage-Referenz; Fallback fuer alte Daten
+function bestRows(p){
+  if(p?.bests?.length)
+    return p.bests.map(b=>bestRow("Best "+durLabel(b.s), b.w, b.w_90d)).join("");
+  return bestRow("Best 1 min", p?.best_1min, p?.best_1min_90d)
+       + bestRow("Best 5 min", p?.best_5min, p?.best_5min_90d)
+       + bestRow("Best 20 min", p?.best_20min, p?.best_20min_90d);
+}
+function durLabel(s){ return s<60 ? s+" s" : (s/60)+" min"; }
 // Best-in-Fahrt + 90-Tage-Bestwert als Referenz dahinter
 function bestRow(label, val, best90){
-  const unit = "W" + (best90!=null ? ` · 90T-Best ${fmtW(best90)}` : "");
+  const pr = val!=null && best90!=null && Math.round(val) >= Math.round(best90);
+  const unit = "W" + (best90!=null ? ` · 90T-Best ${fmtW(best90)}${pr?" ★":""}` : "");
   return row(label, fmtW(val), unit);
 }
 
