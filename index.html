@@ -112,6 +112,12 @@
     <div class="stat"><div class="v" id="sCount">–</div><div class="l">Aktivitäten gesamt</div></div>
   </div>
 
+  <h2>Fortschritt</h2>
+  <div class="card" id="progress"><span class="mut">lädt…</span></div>
+
+  <h2>Wochen-Score</h2>
+  <div class="card" id="wscore"><span class="mut">lädt…</span></div>
+
   <h2>Diagnostik / Benchmark</h2>
   <div id="diag"><div class="card"><span class="mut">lädt…</span></div></div>
 
@@ -434,6 +440,50 @@ function renderSessions(data){
     : (sumKeys.length?"":'<div class="card"><span class="mut">Noch keine Lauf-/Schwimm-/Kraft-Einheiten. Sobald du eine auf Strava hochlädst, erscheint sie hier.</span></div>'));
 }
 
+// ---------- Fortschritt (vs. 4 / 12 Wochen) ----------
+function fmtDelta(m, unit){
+  if(!m || m.delta==null) return '<span class="mut">–</span>';
+  const col = m.delta>0 ? "var(--ok)" : m.delta<0 ? "#f85149" : "var(--mut)";
+  const arrow = m.delta>0 ? "▲" : m.delta<0 ? "▼" : "＝";
+  return `<span style="color:${col}">${arrow} ${m.delta>0?"+":""}${m.delta}${unit}</span>`;
+}
+function renderProgress(p){
+  const el=document.getElementById("progress");
+  if(!p||!p.windows){ el.innerHTML='<span class="mut">Noch keine Fortschrittsdaten – einmal aktualisieren.</span>'; return; }
+  const M=[["ftp_proxy_w","FTP-Proxy"," W"],["w_per_kg","W/kg",""],
+           ["best_5min_w","Best 5 min"," W"],["best_20min_w","Best 20 min"," W"],
+           ["ef_avg","EF (42T-Ø)",""],["ctl","CTL (Fitness)",""]];
+  const w4=p.windows["4w"]||{}, w12=p.windows["12w"]||{};
+  const rows=M.filter(([k])=>w4[k]||w12[k]).map(([k,label,unit])=>{
+    const m4=w4[k], m12=w12[k];
+    const now=(m4&&m4.now!=null)?m4.now:(m12&&m12.now!=null?m12.now:"–");
+    return `<tr><td>${label}</td><td><b>${now}${unit}</b></td>
+      <td>${fmtDelta(m4,unit)}</td><td>${fmtDelta(m12,unit)}</td></tr>`;
+  }).join("");
+  el.innerHTML=`<table><thead><tr><th></th><th>aktuell</th><th>vs. 4 Wo</th><th>vs. 12 Wo</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="mut" style="font-size:12px;margin-top:8px">${p.note||""}<br>${p.basis||""}</div>`;
+}
+// ---------- Wochen-Score ----------
+function renderWeekScores(ws){
+  const el=document.getElementById("wscore");
+  if(!ws||!ws.weeks?.length){ el.innerHTML='<span class="mut">Noch keine bewerteten Wochen – Plan pflegen &amp; aktualisieren.</span>'; return; }
+  const gcol={A:"var(--ok)",B:"var(--ok)",C:"var(--warn)",D:"#f85149"};
+  el.innerHTML=ws.weeks.map(w=>{
+    const c=w.components||{};
+    const comp=[["Plan",c.compliance],["Intensität",c.intensity],["Belastung",c.load]]
+      .filter(x=>x[1]!=null).map(x=>`${x[0]} ${x[1]}`).join(" · ");
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span>KW ab ${w.week_start.slice(5)}${w.partial?' <span class="mut">(läuft)</span>':""}</span>
+        <span style="font-weight:700;color:${gcol[w.grade]||"var(--mut)"}">${w.grade??"–"}
+          <span class="mut" style="font-weight:400">· ${w.score??"–"}/100</span></span></div>
+      <div class="bar"><i style="width:${w.score||0}%"></i></div>
+      <div class="mut" style="font-size:12px;margin-top:2px">${comp}${w.note?" — "+w.note:""}</div>
+    </div>`;}).join("")
+    +`<div class="mut" style="font-size:12px;margin-top:8px">Score = Plan-Umsetzung 40% · Intensität (80/20) 30% · Belastungssteuerung 30% · Noten: ${ws.grades||""}</div>`;
+}
+
 function renderWeek(cw){
   const el=document.getElementById("week");
   if(!cw){ el.innerHTML='<span class="mut">Noch keine Wochendaten – einmal aktualisieren.</span>'; return; }
@@ -545,6 +595,8 @@ async function loadAll(){
       (digest.ef?.latest??"–")+(digest.ef?.trend?" · "+digest.ef.trend:"");
     document.getElementById("sYtd").textContent=digest.volume?.km_ytd??"–";
     renderWeek(digest.current_week);
+    renderProgress(digest.progress);
+    renderWeekScores(digest.week_scores);
     // Letzte Fahrten aus dem reichen recent_rides (Rad)
     const rr=(digest.recent_rides||[]).slice().reverse();
     if(rr.length){
