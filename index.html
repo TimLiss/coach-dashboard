@@ -115,6 +115,9 @@
   <h2>Fortschritt</h2>
   <div class="card" id="progress"><span class="mut">lädt…</span></div>
 
+  <h2>Ziel-Tracking</h2>
+  <div class="card" id="goal"><span class="mut">lädt…</span></div>
+
   <h2>Wochen-Score</h2>
   <div class="card" id="wscore"><span class="mut">lädt…</span></div>
 
@@ -452,7 +455,8 @@ function renderProgress(p){
   if(!p||!p.windows){ el.innerHTML='<span class="mut">Noch keine Fortschrittsdaten – einmal aktualisieren.</span>'; return; }
   const M=[["ftp_proxy_w","FTP-Proxy"," W"],["w_per_kg","W/kg",""],
            ["best_5min_w","Best 5 min"," W"],["best_20min_w","Best 20 min"," W"],
-           ["ef_avg","EF (42T-Ø)",""],["ctl","CTL (Fitness)",""]];
+           ["ef_avg","EF (42T-Ø)",""],["ef_z2_avg","EF Z2-only (42T-Ø)",""],
+           ["ctl","CTL (Fitness)",""]];
   const w4=p.windows["4w"]||{}, w12=p.windows["12w"]||{};
   const rows=M.filter(([k])=>w4[k]||w12[k]).map(([k,label,unit])=>{
     const m4=w4[k], m12=w12[k];
@@ -463,6 +467,27 @@ function renderProgress(p){
   el.innerHTML=`<table><thead><tr><th></th><th>aktuell</th><th>vs. 4 Wo</th><th>vs. 12 Wo</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <div class="mut" style="font-size:12px;margin-top:8px">${p.note||""}<br>${p.basis||""}</div>`;
+}
+// ---------- Ziel-Tracking ----------
+function renderGoal(g){
+  const el=document.getElementById("goal");
+  if(!g){ el.innerHTML='<span class="mut">Kein Ziel gesetzt – „Ziel FTP (W/kg)" unter Meine Werte eintragen.</span>'; return; }
+  const pct=Math.min(100,Math.round(g.pct_to_target||0));
+  const months=(g.monthly||[]).slice(-6);
+  const spark=months.map(m=>
+    `<div style="text-align:center;flex:1"><div style="font-size:12px"><b>${m.wkg}</b></div>
+     <div class="mut" style="font-size:10px">${m.month.slice(2)}</div></div>`).join("");
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;padding:3px 0">
+      <span class="mut">Ziel</span><b>${g.target_wkg} W/kg · ${g.target_w} W</b></div>
+    <div style="display:flex;justify-content:space-between;padding:3px 0">
+      <span class="mut">Aktuell (90T-FTP-Schätzung)</span><b>${g.current_wkg??"–"} W/kg · ${g.current_ftp_w??"–"} W</b></div>
+    <div class="bar" style="height:10px;margin-top:8px"><i style="width:${pct}%;${g.reached?"background:var(--ok)":""}"></i></div>
+    <div class="mut" style="font-size:12px;margin-top:4px">${pct}%${g.gap_wkg>0?` · noch ${g.gap_wkg} W/kg (${g.gap_w} W)`:""}</div>
+    <div class="status ${g.reached||g.eta?"ok":"run"}" style="margin-top:8px">${g.note||""}</div>
+    ${months.length?`<div style="display:flex;gap:4px;margin-top:10px">${spark}</div>
+      <div class="mut" style="font-size:11px;margin-top:4px;text-align:center">Monats-W/kg (FTP-Proxy)</div>`:""}
+    <div class="mut" style="font-size:11px;margin-top:6px">${g.basis||""}</div>`;
 }
 // ---------- Wochen-Score ----------
 function renderWeekScores(ws){
@@ -596,6 +621,7 @@ async function loadAll(){
     document.getElementById("sYtd").textContent=digest.volume?.km_ytd??"–";
     renderWeek(digest.current_week);
     renderProgress(digest.progress);
+    renderGoal(digest.goal);
     renderWeekScores(digest.week_scores);
     // Letzte Fahrten aus dem reichen recent_rides (Rad)
     const rr=(digest.recent_rides||[]).slice().reverse();
@@ -706,7 +732,9 @@ function renderCharts(data){
   CH.ef=new Chart(document.getElementById("cEf"),{type:"line",
     data:{labels:e.map(x=>x.date),datasets:[
       {...ds("EF",e.map(x=>x.ef),COL.mut),borderWidth:1},
-      ds("EF Ø",e.map(x=>x.ef_avg),COL.acc)]}, options:baseOpts()});
+      ds("EF Ø",e.map(x=>x.ef_avg),COL.acc),
+      {...ds("EF Z2 Ø",e.map(x=>x.ef_avg_z2??null),COL.ctl),spanGaps:true}]},
+    options:baseOpts()});
   CH.weekly=new Chart(document.getElementById("cWeekly"),{type:"bar",
     data:{labels:w.map(x=>x.date),datasets:[{label:"km/Woche",data:w.map(x=>x.km),
       backgroundColor:COL.acc,borderWidth:0}]}, options:baseOpts()});
@@ -729,7 +757,7 @@ function setRange(days,btn){
     ch.data.datasets.forEach((d,i)=>d.data=s.map(cols[i]));
     ch.resetZoom(); ch.update(); };
   upd(CH.form,CHART_DATA.form,[x=>x.ctl,x=>x.atl,x=>x.tsb]);
-  upd(CH.ef,CHART_DATA.ef,[x=>x.ef,x=>x.ef_avg]);
+  upd(CH.ef,CHART_DATA.ef,[x=>x.ef,x=>x.ef_avg,x=>x.ef_avg_z2??null]);
   upd(CH.weekly,CHART_DATA.weekly,[x=>x.km]);
 }
 function resetZoom(){ Object.values(CH).forEach(c=>c&&c.resetZoom&&c.resetZoom()); }
